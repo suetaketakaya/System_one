@@ -9,6 +9,7 @@ Usage:
     python benchmark.py
     python benchmark.py --no-system-two          # 判定のみ計測
     python benchmark.py --heavy-model llama3.2   # System Two を差し替え
+    python benchmark.py --set holdout            # ホールドアウトセットで評価
 """
 
 from __future__ import annotations
@@ -20,6 +21,8 @@ import time
 from dataclasses import dataclass
 
 import ollama
+
+from cases import CASE_SETS, Case
 
 ROUTER_MODEL = "qwen2.5:0.5b"
 HEAVY_MODEL = "qwen2.5:7b"
@@ -37,10 +40,16 @@ ROUTER_SHOTS: list[tuple[str, str]] = [
     ("What is 7 times 8?", "A"),
     ("日本の首都は？", "A"),
     ("ありがとう", "A"),
+    # 短い定義で済む依頼は A。"Explain"/"Define" という動詞に引きずられないようにする。
+    ("Explain what a pointer is.", "A"),
+    ("Define latency.", "A"),
     ("Write a Python script to parse CSV files", "B"),
     ("障害の原因を分析して再発防止策をまとめて", "B"),
     ("Compare PostgreSQL and MySQL for analytics", "B"),
     ("キャッシュ戦略を設計して", "B"),
+    # 既存コードの書き換え・多段の仕組み説明も B。
+    ("Refactor this function to remove duplication", "B"),
+    ("Explain how HTTPS certificate validation works, step by step", "B"),
 ]
 
 
@@ -50,75 +59,6 @@ def _router_messages() -> list[dict[str, str]]:
         messages.append({"role": "user", "content": request})
         messages.append({"role": "assistant", "content": label})
     return messages
-
-
-@dataclass(frozen=True)
-class Case:
-    request: str
-    expected: str  # "SIMPLE" or "COMPLEX"
-    lang: str      # "ja" or "en"
-
-
-# few-shot 例と重複しないケースのみを採用している（リークを避けるため）。
-CASES: list[Case] = [
-    # --- SIMPLE / ja ---
-    Case("こんにちは", "SIMPLE", "ja"),
-    Case("今日は何曜日ですか？", "SIMPLE", "ja"),
-    Case("2 + 2 は？", "SIMPLE", "ja"),
-    Case("ありがとう、助かりました", "SIMPLE", "ja"),
-    Case("東京の郵便番号の桁数は？", "SIMPLE", "ja"),
-    Case("お疲れさまです", "SIMPLE", "ja"),
-    Case("富士山の高さは？", "SIMPLE", "ja"),
-    Case("1200 円の 10% はいくら？", "SIMPLE", "ja"),
-    Case("またね", "SIMPLE", "ja"),
-    Case("HTTP の 404 は何を意味する？", "SIMPLE", "ja"),
-    Case("了解しました", "SIMPLE", "ja"),
-    Case("1 マイルは何キロ？", "SIMPLE", "ja"),
-    Case("JSON の正式名称は？", "SIMPLE", "ja"),
-
-    # --- SIMPLE / en ---
-    Case("Is Python a compiled language?", "SIMPLE", "en"),
-    Case("good evening", "SIMPLE", "en"),
-    Case("What's the capital of Australia?", "SIMPLE", "en"),
-    Case("thanks a lot", "SIMPLE", "en"),
-    Case("How many bytes are in a kilobyte?", "SIMPLE", "en"),
-    Case("What does API stand for?", "SIMPLE", "en"),
-    Case("Is 17 a prime number?", "SIMPLE", "en"),
-    Case("Who wrote the novel 1984?", "SIMPLE", "en"),
-    Case("see you tomorrow", "SIMPLE", "en"),
-    Case("What port does HTTPS use?", "SIMPLE", "en"),
-    Case("How many minutes are in a day?", "SIMPLE", "en"),
-    Case("no problem, got it", "SIMPLE", "en"),
-
-    # --- COMPLEX / ja ---
-    Case("マイクロサービス構成でのイベント駆動設計の利点と欠点を比較して", "COMPLEX", "ja"),
-    Case("この四半期の売上データからチャーンの原因を推論して施策を3つ提案して", "COMPLEX", "ja"),
-    Case("SQL のクエリが遅い原因を段階的に切り分ける手順を書いて", "COMPLEX", "ja"),
-    Case("新規プロダクトのオンボーディング改善ロードマップを作って", "COMPLEX", "ja"),
-    Case("Kubernetes のオートスケール設定をレビューして改善案を出して", "COMPLEX", "ja"),
-    Case("再帰を使わずに二分探索木を走査する Python コードを書いて", "COMPLEX", "ja"),
-    Case("認証基盤を OAuth2 に移行する際のリスクと段取りを整理して", "COMPLEX", "ja"),
-    Case("A/B テストの結果が有意かどうか判断する手順を説明して", "COMPLEX", "ja"),
-    Case("レガシーコードのリファクタリング方針を優先度つきでまとめて", "COMPLEX", "ja"),
-    Case("CI が不安定な原因を切り分けて恒久対策を提案して", "COMPLEX", "ja"),
-    Case("マルチテナント DB のスキーマ設計を比較検討して", "COMPLEX", "ja"),
-    Case("オンコール当番のローテーション方式を設計して", "COMPLEX", "ja"),
-    Case("機械学習モデルの過学習を抑える手法を効果とコストで比較して", "COMPLEX", "ja"),
-
-    # --- COMPLEX / en ---
-    Case("Write a Python function that merges overlapping intervals.", "COMPLEX", "en"),
-    Case("Explain the trade-offs between BFS and Dijkstra with complexity analysis.", "COMPLEX", "en"),
-    Case("Design a rate limiter for a distributed API gateway.", "COMPLEX", "en"),
-    Case("Refactor this callback-based code into async/await and explain why.", "COMPLEX", "en"),
-    Case("Draft a migration plan from REST to GraphQL for a mobile backend.", "COMPLEX", "en"),
-    Case("Analyze why our p99 latency regressed after the last deploy.", "COMPLEX", "en"),
-    Case("Write unit tests covering the edge cases of a date parser.", "COMPLEX", "en"),
-    Case("Compare vector databases for a RAG pipeline at 10M documents.", "COMPLEX", "en"),
-    Case("Design a schema for a multi-region event log with ordering guarantees.", "COMPLEX", "en"),
-    Case("Explain how TCP congestion control reacts to packet loss, step by step.", "COMPLEX", "en"),
-    Case("Build a retry strategy with exponential backoff and jitter, with code.", "COMPLEX", "en"),
-    Case("Evaluate whether we should adopt a monorepo, with the trade-offs.", "COMPLEX", "en"),
-]
 
 
 @dataclass
@@ -172,6 +112,7 @@ def _preview(text: str, width: int = 34) -> str:
 
 
 def run(args: argparse.Namespace) -> int:
+    selected = CASE_SETS[args.set]
     client = ollama.Client(host=args.host)
 
     try:
@@ -196,10 +137,11 @@ def run(args: argparse.Namespace) -> int:
 
     print(f"System One: {args.router_model}")
     print(f"System Two: {args.heavy_model if use_system_two else '(skipped)'}")
+    print(f"ケースセット: {args.set} ({len(selected)} 件)")
     print(f"試行回数  : {args.repeat} 回 / ケース")
     print("-" * 78)
 
-    for case in CASES:
+    for case in selected:
         latencies: list[float] = []
         label = "COMPLEX"
         for _ in range(args.repeat):
@@ -292,6 +234,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="System One + LLM ルーティングのベンチマーク")
     parser.add_argument("--router-model", default=ROUTER_MODEL, help=f"System One のモデル (default: {ROUTER_MODEL})")
     parser.add_argument("--heavy-model", default=HEAVY_MODEL, help=f"System Two のモデル (default: {HEAVY_MODEL})")
+    parser.add_argument("--set", choices=sorted(CASE_SETS), default="all",
+                        help="評価するケースセット。dev=調整用 / holdout=汎化測定用 (default: all)")
     parser.add_argument("--repeat", type=int, default=3, help="1 ケースあたりの判定試行回数 (default: 3)")
     parser.add_argument("--no-system-two", action="store_true", help="System Two を起動せず判定のみ計測する")
     parser.add_argument("--host", default=None, help="Ollama のホスト (例: http://localhost:11434)")
