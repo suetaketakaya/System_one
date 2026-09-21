@@ -74,20 +74,20 @@ python benchmark.py --host http://localhost:11434
 
 ## 検証結果のサンプル (Benchmark Results)
 
-Apple Silicon / macOS・12 ケース（SIMPLE 6 / COMPLEX 6）での実測値です。
+Apple Silicon / macOS・12 ケース（SIMPLE 6 / COMPLEX 6）・各ケース 3 回試行（中央値採用）での実測値です。
 
 | 測定項目 | 結果 |
 | --- | --- |
 | System One（ルーター役） | Qwen2.5:0.5B |
-| System Two（重い推論役） | Llama3.2:3B |
-| 平均判定レイテンシ | 約 22.2 ms |
-| p95 判定レイテンシ | 約 35.8 ms |
+| System Two（重い推論役） | Qwen2.5:7B |
+| 平均判定レイテンシ | 約 20.4 ms |
+| p95 判定レイテンシ | 約 26.3 ms |
 | 分類精度 | 100.0 % |
 | LLM オフロード率 | 50.0 % |
-| System Two 平均レイテンシ | 約 3,040 ms |
-| 総処理時間の削減率 | 49.6 % |
+| System Two 平均レイテンシ | 約 5,976 ms |
+| 総処理時間の削減率 | 49.8 % |
 
-> 判定は System Two の約 1/137 の時間で完了し、半数のリクエストで重いモデルの起動自体を回避できました。
+> 判定は System Two の約 1/293 の時間（約 0.02 秒 vs 約 6.0 秒）で完了し、半数のリクエストで重いモデルの起動自体を回避できました。
 > 実測値はハードウェア・モデル・プロンプトにより変動します。
 
 ## 仕組み (How the router works)
